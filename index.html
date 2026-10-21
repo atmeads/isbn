@@ -33,7 +33,7 @@ button.secondary,.filebutton.secondary{background:#e8eee8;color:var(--green);bor
 <h2>Add a book</h2>
 <div class="row two">
   <div><label for="isbn">ISBN-13 / ISBN-10</label><input id="isbn" inputmode="numeric" autocomplete="off" placeholder="e.g. 9780141036144"></div>
-  <div><label for="category">Category</label><select id="category"><option>History</option><option>Crime and thrillers</option><option>Fictions</option><option>Childrens</option><option selected>Others</option></select></div>
+  <div><label for="category">Category / Subject</label><input id="category" placeholder="e.g. Fiction, History"></div>
 </div>
 <div class="actions"><button id="scanBtn">▦ Scan barcode</button><button id="lookupBtn">Look up ISBN</button><button id="manualBtn" class="secondary">Enter details manually</button></div>
 <div id="cameraWrap"><video id="video" playsinline muted></video><div class="actions"><button id="stopScan" class="secondary">Stop camera</button></div><p class="hint">Point the camera at the book's ISBN barcode and <strong>tap the video preview to focus</strong>. If scanning is unavailable, type the number above.</p></div>
@@ -47,7 +47,7 @@ button.secondary,.filebutton.secondary{background:#e8eee8;color:var(--green);bor
     <div><label for="language">Language</label><input id="language" placeholder="e.g. en"></div>
     <div><label for="pages">Pages</label><input id="pages" inputmode="numeric"></div>
   </div>
-  <label for="notes">Notes</label><textarea id="notes" rows="2" placeholder="Optional notes"></textarea>
+  <label for="notes">Notes / Synopsis</label><textarea id="notes" rows="3" placeholder="Optional notes or Google Books description"></textarea>
   <div class="actions"><button id="saveBtn">Save book</button><button id="cancelEdit" class="secondary">Cancel</button></div>
 </div>
 </section>
