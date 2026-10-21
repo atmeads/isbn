@@ -18,7 +18,7 @@ input,select,textarea{font:inherit;width:100%;padding:11px 12px;border:1px solid
 button,.filebutton{font:inherit;font-weight:650;border:0;border-radius:9px;padding:11px 13px;min-height:43px;background:var(--green);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px}
 button.secondary,.filebutton.secondary{background:#e8eee8;color:var(--green);border:1px solid #d4dfd5}button.danger{background:#fff0f0;color:var(--danger);border:1px solid #f0caca}button:disabled{opacity:.5;cursor:not-allowed}
 .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:11px}.row{display:grid;grid-template-columns:1fr;gap:10px}.hint,.muted{color:var(--muted);font-size:.87rem}.status{padding:9px 11px;background:#edf4ed;border-radius:8px;margin-top:10px;font-size:.9rem;white-space:pre-wrap}.status.error{background:#fff0f0;color:#8d2222}
-#cameraWrap{display:none;margin-top:12px}video{width:100%;max-height:55vh;background:#101b17;border-radius:12px;object-fit:cover} .searchbar{display:flex;gap:8px}.searchbar input{flex:1;min-width:0}
+#cameraWrap{display:none;margin-top:12px}video{width:100%;max-height:55vh;background:#101b17;border-radius:12px;object-fit:cover;cursor:pointer} .searchbar{display:flex;gap:8px}.searchbar input{flex:1;min-width:0}
 .stats{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.stat{background:#e8eee8;border-radius:99px;padding:5px 10px;font-size:.85rem}
 .book{border:1px solid var(--line);border-radius:12px;padding:12px;margin:9px 0;background:#fff}.booktop{display:flex;gap:12px;align-items:flex-start}.cover{width:62px;min-width:62px;height:88px;object-fit:cover;border-radius:4px;background:#edf0eb}.book h3{font-size:1rem;line-height:1.3;margin:0 0 4px}.book p{margin:3px 0;font-size:.88rem;color:var(--muted);overflow-wrap:anywhere}.book .bookactions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.book .bookactions button{padding:8px 10px;min-height:36px;font-size:.86rem}
 .empty{text-align:center;padding:25px 10px;color:var(--muted)}.small{font-size:.82rem}.toolbar{display:flex;gap:8px;flex-wrap:wrap}.toolbar>*{flex:1}
@@ -36,7 +36,7 @@ button.secondary,.filebutton.secondary{background:#e8eee8;color:var(--green);bor
   <div><label for="category">Category</label><select id="category"><option>History</option><option>Crime and thrillers</option><option>Fictions</option><option>Childrens</option><option selected>Others</option></select></div>
 </div>
 <div class="actions"><button id="scanBtn">▦ Scan barcode</button><button id="lookupBtn">Look up ISBN</button><button id="manualBtn" class="secondary">Enter details manually</button></div>
-<div id="cameraWrap"><video id="video" playsinline muted></video><div class="actions"><button id="stopScan" class="secondary">Stop camera</button></div><p class="hint">Point the camera at the book's ISBN barcode. If scanning is unavailable, type the number above.</p></div>
+<div id="cameraWrap"><video id="video" playsinline muted></video><div class="actions"><button id="stopScan" class="secondary">Stop camera</button></div><p class="hint">Point the camera at the book's ISBN barcode and <strong>tap the video preview to focus</strong>. If scanning is unavailable, type the number above.</p></div>
 <div id="status" class="status" role="status" aria-live="polite">Ready. Scanning needs camera permission and a secure HTTPS page.</div>
 <div id="editForm" class="hidden">
   <div class="row two">
