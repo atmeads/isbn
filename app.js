@@ -1,165 +1,76 @@
-(() => {
-'use strict';
-const $ = id => document.getElementById(id);
-const DB_KEY = 'isbn-book-tracker-v1';
-const fields = ['isbn','title','authors','publisher','year','language','pages','category','notes'];
-let books = loadBooks(), editingId = null, stream = null, detector = null, scanLoop = false;
-
-function loadBooks(){ try { const x=JSON.parse(localStorage.getItem(DB_KEY)||'[]'); return Array.isArray(x)?x:[]; } catch { return []; } }
-function persist(){ localStorage.setItem(DB_KEY,JSON.stringify(books)); render(); }
-function say(message,error=false){ $('status').textContent=message; $('status').classList.toggle('error',error); }
-function cleanIsbn(v){return String(v||'').replace(/[^0-9Xx]/g,'').toUpperCase();}
-function validIsbn(v){const s=cleanIsbn(v); if(s.length===10){let sum=0;for(let i=0;i<10;i++){const n=i===9&&s[i]==='X'?10:Number(s[i]);if(!Number.isInteger(n)||n<0||n>10)return false;sum+=(10-i)*n;}return sum%11===0;} if(s.length===13&&/^\d{13}$/.test(s)){let sum=0;for(let i=0;i<13;i++)sum+=Number(s[i])*(i%2?3:1);return sum%10===0;}return false;}
-function canonicalIsbn(v){let s=cleanIsbn(v); if(s.length===10){let sum=0;for(let i=0;i<9;i++)sum+=Number(s[i])*(10-i);sum=(11-sum%11)%11;return s+' (ISBN-10)';}return s;}
-function normalize(b){return {id:b.id||crypto.randomUUID(),isbn:cleanIsbn(b.isbn||''),title:String(b.title||'').trim(),authors:String(b.authors||'').trim(),publisher:String(b.publisher||'').trim(),year:String(b.year||'').trim(),language:String(b.language||'').trim(),pages:String(b.pages||'').trim(),category:String(b.category||'').trim(),notes:String(b.notes||'').trim(),addedAt:b.addedAt||new Date().toISOString(),updatedAt:new Date().toISOString(),cover:b.cover||''};}
-
-function render(){
- const q=$('filter').value.trim().toLowerCase();
- const shown=books.filter(b=>[b.isbn,b.title,b.authors,b.publisher,b.year,b.category,b.notes].join(' ').toLowerCase().includes(q)).sort((a,b)=>a.title.localeCompare(b.title));
- $('totalCount').textContent=books.length;
- const list=$('bookList');
- if(!shown.length){list.innerHTML=`<div class="empty">${books.length?'No matching books.':'No books saved yet. Scan a barcode or enter an ISBN to get started.'}</div>`;return;}
- list.innerHTML=shown.map(b=>`<article class="book" data-id="${esc(b.id)}"><div class="booktop">${b.cover?`<img class="cover" src="${esc(b.cover)}" alt="" loading="lazy" onerror="this.style.display='none'">`:`<div class="cover" aria-hidden="true"></div>`}<div><h3>${esc(b.title||'Untitled book')}</h3><p>${esc(b.authors||'Author unknown')}</p><p>${esc([b.publisher,b.year,b.pages?b.pages+' pages':''].filter(Boolean).join(' · '))}</p><p>ISBN: ${esc(b.isbn||'Not recorded')}${b.category?' · '+esc(b.category):''}</p>${b.notes?`<p>Notes: ${esc(b.notes)}</p>`:''}</div></div><div class="bookactions"><button class="secondary edit" data-id="${esc(b.id)}">Edit</button><button class="secondary lookup" data-isbn="${esc(b.isbn)}">Refresh metadata</button><button class="danger delete" data-id="${esc(b.id)}">Delete</button></div></article>`).join('');
-}
-function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function showForm(book={}){editingId=book.id||null;$('editForm').classList.remove('hidden');for(const f of ['title','authors','publisher','year','language','pages','category','notes'])$(f).value=book[f]||'';$('saveBtn').textContent=editingId?'Update book':'Save book';$('title').focus();}
-function hideForm(){$('editForm').classList.add('hidden');editingId=null;}
-async function lookup(isbn,existing=null){
- const s=cleanIsbn(isbn); if(!s){say('Enter an ISBN first.',true);return;}
- $('isbn').value=s; say('Looking up comprehensive metadata from Google Books and Open Library…');
- const urls=[
-  `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(s)}`,
-  `https://openlibrary.org/api/books?bibkeys=ISBN:${encodeURIComponent(s)}&format=json&jscmd=data`
- ];
- let found=null, errors=[];
- 
- try{
-  const r=await fetch(urls[0]);
-  if(!r.ok)throw Error('Google Books HTTP '+r.status);
-  const j=await r.json();
-  const v=j.items?.[0]?.volumeInfo;
-  if(v){
-   // Extract categories array or mainCategory from Google Books
-   let cat = '';
-   if (v.mainCategory) {
-    cat = v.mainCategory;
-   } else if (Array.isArray(v.categories) && v.categories.length > 0) {
-    cat = v.categories.join(', ');
-   }
-
-   // Extract subtitle if present to enhance title
-   let fullTitle = v.title || '';
-   if (v.subtitle) {
-    fullTitle += ': ' + v.subtitle;
-   }
-
-   // Strip HTML tags from description if present
-   let description = '';
-   if (v.description) {
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = v.description;
-    description = tempDiv.textContent || tempDiv.innerText || '';
-   }
-
-   found = {
-    title: fullTitle,
-    authors: (v.authors || []).join(', '),
-    publisher: v.publisher || '',
-    year: (v.publishedDate || '').slice(0, 4),
-    language: v.language || '',
-    pages: v.pageCount ? String(v.pageCount) : '',
-    cover: v.imageLinks?.extraLarge || v.imageLinks?.large || v.imageLinks?.medium || v.imageLinks?.thumbnail?.replace('http://', 'https://') || '',
-    category: cat,
-    notes: description
-   };
-  }
- }catch(e){errors.push('Google Books: '+e.message);}
-
- if(!found){
-  try{
-   const r=await fetch(urls[1]);
-   if(!r.ok)throw Error('Open Library HTTP '+r.status);
-   const j=await r.json();
-   const v=j['ISBN:'+s];
-   if(v){
-    found={
-     title: v.title || '',
-     authors: (v.authors||[]).map(a=>a.name).join(', '),
-     publisher: (v.publishers||[]).map(p=>p.name).join(', '),
-     year: v.publish_date?String(v.publish_date).match(/\d{4}/)?.[0]||'':'',
-     pages: v.number_of_pages ? String(v.number_of_pages) : '',
-     cover: v.cover?.large || v.cover?.medium || '',
-     category: '',
-     notes: v.notes || ''
-    };
-   }
-  }catch(e){errors.push('Open Library: '+e.message);}
- }
-
- if(found){
-  const base=existing||{isbn:s};
-  showForm({...base,...Object.fromEntries(Object.entries(found).filter(([k,v])=>v!==undefined&&v!==null&&v!=='')),isbn:s});
-  say('Metadata and categories retrieved successfully from Google Books. Check and save.');
- }else{
-  showForm({...existing,isbn:s});
-  say(validIsbn(s)?'No metadata found. You can enter details manually. '+errors.join(' | '):'No metadata found and ISBN checksum looks invalid. Check the number or enter details manually.',true);
- }
-}
-
-function save(){
- const isbn=cleanIsbn($('isbn').value);
- const data=normalize({id:editingId||undefined,isbn,title:$('title').value,authors:$('authors').value,publisher:$('publisher').value,year:$('year').value,language:$('language').value,pages:$('pages').value,category:$('category').value,notes:$('notes').value});
- const coverCurrent=editingId?books.find(b=>b.id===editingId)?.cover:'';
- data.cover=coverCurrent||'';
- if(!data.title){say('Please enter a title.',true);$('title').focus();return;}
- const same=isbn?books.find(b=>cleanIsbn(b.isbn)===isbn&&b.id!==editingId):null;
- if(same){if(!confirm('A book with this ISBN already exists. Update that record with these details?'))return;data.id=same.id;data.addedAt=same.addedAt;books=books.filter(b=>b.id!==same.id);}
- if(editingId){const old=books.find(b=>b.id===editingId);data.addedAt=old?.addedAt||data.addedAt;data.cover=old?.cover||data.cover;books=books.filter(b=>b.id!==editingId);}
- books.push(data);persist();hideForm();say('Book saved.');$('isbn').value='';
-}
-function editBook(id){const b=books.find(x=>x.id===id);if(!b)return;$('isbn').value=b.isbn;showForm(b);say('Edit the details, then save.');}
-function deleteBook(id){const b=books.find(x=>x.id===id);if(b&&confirm(`Delete “${b.title}”?`)){books=books.filter(x=>x.id!==id);persist();say('Book deleted.');}}
-function csvCell(v){let s=String(v??'');return /[",\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}
-function exportCsv(){const cols=['isbn','title','authors','publisher','year','language','pages','category','notes','addedAt','updatedAt'];const rows=[cols.join(','),...books.map(b=>cols.map(k=>csvCell(b[k])).join(','))];const blob=new Blob(['\ufeff'+rows.join('\r\n')],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='book-tracker-backup-'+new Date().toISOString().slice(0,10)+'.csv';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);say(`Exported ${books.length} book records to CSV.`);}
-function parseCsv(text){const rows=[];let row=[],cell='',quoted=false;for(let i=0;i<text.length;i++){const c=text[i];if(quoted){if(c==='"'&&text[i+1]==='"'){cell+='"';i++;}else if(c==='"')quoted=false;else cell+=c;}else if(c==='"')quoted=true;else if(c===','){row.push(cell);cell='';}else if(c==='\n'){row.push(cell.replace(/\r$/,''));rows.push(row);row=[];cell='';}else cell+=c;}if(cell.length\vert{}\vert{}row.length){row.push(cell.replace(/\r$/,''));rows.push(row);}return rows.filter(r=>r.some(x=>x.trim()!==''));}
-async function importCsv(file){try{const rows=parseCsv((await file.text()).replace(/^\ufeff/,''));if(rows.length<2)throw Error('CSV has no data rows.');const headers=rows.shift().map(h=>h.trim().toLowerCase());if(!headers.includes('title'))throw Error('CSV needs a title column.');let added=0,updated=0,skipped=0;for(const row of rows){const obj={};headers.forEach((h,i)=>obj[h]=row[i]??'');if(!String(obj.title||'').trim()){skipped++;continue;}const isbn=cleanIsbn(obj.isbn||'');const existing=isbn?books.find(b=>cleanIsbn(b.isbn)===isbn):null;const b=normalize({...obj,isbn,id:existing?.id||undefined,addedAt:existing?.addedAt||obj.addedat});if(existing){b.cover=existing.cover||'';books=books.map(x=>x.id===existing.id?b:x);updated++;}else{books.push(b);added++;}}persist();say(`Import complete: ${added} added, ${updated} updated, ${skipped} skipped.`);}catch(e){say('Import failed: '+e.message,true);}finally{$('csvFile').value='';}}
-async function startScan(){
- if(!('BarcodeDetector' in window)){say('Barcode scanning is not supported by this browser. Enter the ISBN manually instead.',true);return;}
- try{detector=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e']});stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});$('video').srcObject=stream;$('cameraWrap').style.display='block';await$('video').play();scanLoop=true;say('Camera is on. Hold the ISBN barcode inside the camera view (tap video to focus).');scanFrame();}catch(e){stopScan();say('Could not start camera: '+e.message+'. Check camera permission and use an HTTPS page.',true);}
-}
-async function scanFrame(){if(!scanLoop||!stream)return;try{const codes=await detector.detect($('video'));if(codes.length){const value=codes[0].rawValue;if(value){$('isbn').value=value;stopScan();say('Barcode captured: '+value);lookup(value);return;}}}catch{}requestAnimationFrame(scanFrame);}
-function stopScan(){scanLoop=false;if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}$('video').srcObject=null;$('cameraWrap').style.display='none';}
-
-// Click to focus video stream
-$('video').addEventListener('click', async () => {
- if(!stream)return;
- try{
-  const track=stream.getVideoTracks()[0];
-  if(!track)return;
-  const capabilities=track.getCapabilities?track.getCapabilities():{};
-  if(capabilities.focusMode){
-   const modes=Array.isArray(capabilities.focusMode)?capabilities.focusMode:[capabilities.focusMode];
-   if(modes.includes('single-shot')){
-    await track.applyConstraints({advanced:[{focusMode:'single-shot'}]});
-    say('Camera focus triggered.');
-   }else if(modes.includes('continuous')){
-    await track.applyConstraints({advanced:[{focusMode:'continuous'}]});
-    say('Camera focus set to continuous.');
-   }else if(modes.includes('manual')){
-    await track.applyConstraints({advanced:[{focusMode:'manual'}]});
-    say('Camera focus set to manual.');
-   }
-  }else{
-   await track.applyConstraints({advanced:[{focusMode:'single-shot'}]}).catch(()=>{});
-   say('Camera focus requested.');
-  }
- }catch(e){console.warn('Focus constraint error:',e);}
-});
-
-$('lookupBtn').addEventListener('click',()=>lookup($('isbn').value));$('scanBtn').addEventListener('click',startScan);$('stopScan').addEventListener('click',stopScan);$('manualBtn').addEventListener('click',()=>{showForm({isbn:cleanIsbn($('isbn').value),category:$('category').value});say('Enter any details you have, then save.');});
-$('saveBtn').addEventListener('click',save);$('cancelEdit').addEventListener('click',()=>{hideForm();say('Editing cancelled.');});
-$('filter').addEventListener('input',render);$('clearSearch').addEventListener('click',()=>{$('filter').value='';render();});$('exportBtn').addEventListener('click',exportCsv);$('csvFile').addEventListener('change',e=>{if(e.target.files[0])importCsv(e.target.files[0]);});$('clearAllBtn').addEventListener('click',()=>{if(books.length&&confirm('Delete every saved book from this device? Export a CSV backup first if needed.')){books=[];persist();say('All book records deleted.');}});
-$('bookList').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.classList.contains('edit'))editBook(b.dataset.id);if(b.classList.contains('delete'))deleteBook(b.dataset.id);if(b.classList.contains('lookup'))lookup(b.dataset.isbn,books.find(x=>x.isbn===b.dataset.isbn));});
-if('serviceWorker' in navigator && location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});
-render();
-})();
+const DB_NAME="bookends_inventory_v1", DB_VERSION=1;
+const CATS=["History","Crime & Thrillers","Fiction","Children's","Non-fiction","Reference","Other"];
+const SUBS={"History":["British","European","World","Military","Biography"],"Crime & Thrillers":["Detective","Police","Psychological","Spy"],"Fiction":["Literary","Classics","Romance","Science Fiction","Fantasy"],"Children's":["Picture Books","Early Readers","Young Adult"],"Non-fiction":["Science","Technology","Business","Health","Travel"],"Reference":["Dictionaries","Encyclopedias","Academic"],"Other":["Unclassified","Miscellaneous"]};
+const T={
+en:{subtitle:"Library Charity Bookshop",scan:"Scan / Add",inventory:"Inventory",reports:"Reports",settings:"Settings & Sync",addBook:"Add a book",scanHelp:"Scan the barcode or enter an ISBN. You can work offline.",lookup:"Look up",camera:"Use camera scanner",clear:"Clear",bookDetails:"Book details",title:"Title",author:"Author(s)",isbn:"ISBN",publisher:"Publisher",pubDate:"Publication date",language:"Book language",category:"Category",subcategory:"Subcategory",description:"Description / notes",physicalCopies:"Physical copies",copiesHelp:"Each copy can have its own condition, price and location.",addCopy:"+ Add another copy",saveBook:"Save to inventory",inventoryHelp:"Search, filter and update your local stock.",exportCsv:"Export CSV",searchPlaceholder:"Search title, author, ISBN or copy ID…",allCategories:"All categories",allStatuses:"All statuses",reportsHelp:"A quick view of Bookends stock and processing.",byCategory:"Stock by category",syncHelp:"Local-first data with optional shared cloud sync for volunteers.",cloudSync:"Shared volunteer sync (Supabase)",cloudNote:"Each volunteer signs in with an account in the same Supabase project and organisation. Local changes remain available offline and sync when online.",orgId:"Organisation ID (shared with volunteers)",email:"Volunteer email",password:"Password",signIn:"Sign in",signOut:"Sign out",syncNow:"Sync now",backupRestore:"Backup & restore",backupNote:"CSV is portable and opens in Excel. JSON contains a complete backup.",backupJson:"Download JSON backup",importCsv:"Import CSV",restoreJson:"Restore JSON",dataCare:"Data and privacy",dataCareText:"Without cloud sync, records are stored only in this browser on this device. Export backups regularly. Do not store donor or customer personal data.",footer:"Volunteer tool · Not affiliated with the library's official systems",editCopy:"Edit copy",condition:"Condition",price:"Price (£)",location:"Location",status:"Status",cancel:"Cancel",saveChanges:"Save changes",available:"Available",shelved:"Shelved",sold:"Sold",withdrawn:"Withdrawn",saved:"Saved",noBooks:"No books match your search.",noCopies:"No copies",cameraUnsupported:"Camera barcode scanning is not supported by this browser. Please enter the ISBN manually.",cameraDenied:"Camera unavailable or permission denied.",found:"Metadata found",notFound:"No metadata found. Enter details manually.",savedCount:"Saved {n} physical copy/copies.",scanNext:"Ready for the next book.",signInFirst:"Sign in before syncing.",syncDone:"Sync complete.",syncError:"Sync failed: ",signedIn:"Signed in.",signedOut:"Signed out.",imported:"Imported {n} row(s).",invalidCsv:"Could not import CSV: ",duplicate:"Possible duplicate ISBN already exists.",lookupOffline:"You are offline. Enter or save details manually; metadata lookup needs internet.",deleted:"Copy deleted."},
+zh:{subtitle:"圖書館慈善書店",scan:"掃描／新增",inventory:"庫存",reports:"報告",settings:"設定及同步",addBook:"新增書籍",scanHelp:"掃描條碼或輸入 ISBN。離線時仍可工作。",lookup:"查詢",camera:"使用相機掃描",clear:"清除",bookDetails:"書籍資料",title:"書名",author:"作者",isbn:"ISBN",publisher:"出版社",pubDate:"出版日期",language:"書籍語言",category:"分類",subcategory:"子分類",description:"簡介／備註",physicalCopies:"實體副本",copiesHelp:"每本副本可有獨立品相、價格及位置。",addCopy:"+ 新增副本",saveBook:"儲存至庫存",inventoryHelp:"搜尋、篩選及更新本地庫存。",exportCsv:"匯出 CSV",searchPlaceholder:"搜尋書名、作者、ISBN 或副本編號…",allCategories:"所有分類",allStatuses:"所有狀態",reportsHelp:"快速查看 Bookends 庫存及處理情況。",byCategory:"各分類庫存",syncHelp:"以本地資料為先，並可選擇與義工共用雲端同步。",cloudSync:"義工共用同步（Supabase）",cloudNote:"每位義工使用同一 Supabase 專案及機構的帳戶登入。本地修改可離線保存，連線後同步。",orgId:"機構 ID（所有義工共用）",email:"義工電郵",password:"密碼",signIn:"登入",signOut:"登出",syncNow:"立即同步",backupRestore:"備份及還原",backupNote:"CSV 可用 Excel 開啟；JSON 備份包含完整記錄。",backupJson:"下載 JSON 備份",importCsv:"匯入 CSV",restoreJson:"還原 JSON",dataCare:"資料及私隱",dataCareText:"未啟用雲端同步時，資料只儲存在此裝置的瀏覽器。請定期匯出備份。不要記錄捐贈者或顧客個人資料。",footer:"義工工具 · 並非圖書館官方系統",editCopy:"編輯副本",condition:"品相",price:"價格 (£)",location:"位置",status:"狀態",cancel:"取消",saveChanges:"儲存修改",available:"待上架",shelved:"已上架",sold:"已售出",withdrawn:"已撤下",saved:"已儲存",noBooks:"找不到符合條件的書籍。",noCopies:"沒有副本",cameraUnsupported:"此瀏覽器不支援相機條碼掃描，請手動輸入 ISBN。",cameraDenied:"無法使用相機或未獲授權。",found:"已找到書籍資料",notFound:"找不到資料，請手動輸入。",savedCount:"已儲存 {n} 本實體副本。",scanNext:"可以掃描下一本書。",signInFirst:"請先登入再同步。",syncDone:"同步完成。",syncError:"同步失敗：",signedIn:"登入成功。",signedOut:"已登出。",imported:"已匯入 {n} 行。",invalidCsv:"無法匯入 CSV：",duplicate:"庫存中可能已有相同 ISBN。",deleted:"已刪除副本。"}
+};
+let lang=localStorage.getItem("be_lang")||"en", db, currentCopies=0, stream=null, session=null;
+const $=id=>document.getElementById(id), tr=k=>T[lang][k]||T.en[k]||k;
+function msg(k){return tr(k)}
+function uuid(){return crypto.randomUUID?crypto.randomUUID():"xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g,c=>{let r=Math.random()*16|0;return(c==="x"?r:(r&3|8)).toString(16)})}
+function openDB(){return new Promise((res,rej)=>{let r=indexedDB.open(DB_NAME,DB_VERSION);r.onupgradeneeded=()=>{let d=r.result;d.createObjectStore("books",{keyPath:"id"});d.createObjectStore("copies",{keyPath:"id"});};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+function store(name,mode="readonly"){return db.transaction(name,mode).objectStore(name)}
+function req(r){return new Promise((res,rej)=>{r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+async function all(name){return req(store(name).getAll())}
+async function put(name,obj){return req(store(name,"readwrite").put(obj))}
+async function remove(name,id){return req(store(name,"readwrite").delete(id))}
+function setLang(){document.documentElement.lang=lang==="zh"?"zh-Hant":"en";document.querySelectorAll("[data-i18n]").forEach(el=>{let k=el.dataset.i18n;if(T[lang][k])el.textContent=T[lang][k]});document.querySelectorAll("[data-i18n-placeholder]").forEach(el=>el.placeholder=tr(el.dataset.i18nPlaceholder));$("langBtn").textContent=lang==="en"?"中文":"English";fillCategories();renderInventory();renderStats()}
+function fillCategories(){let html=CATS.map(c=>`<option>${esc(c)}</option>`).join("");$("category").innerHTML=html;$("filterCategory").innerHTML=`<option value="">${tr("allCategories")}</option>`+html}
+function esc(s=""){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function nav(tab){document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active",b.dataset.tab===tab));document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id===tab));if(tab==="inventory")renderInventory();if(tab==="reports")renderStats()}
+function addCopyRow(data={}){currentCopies++;let row=document.createElement("div");row.className="copyrow";row.innerHTML=`<label>${tr("condition")}<select class="c-condition">${["New","Excellent","Good","Fair","Poor"].map(x=>`<option ${data.condition===x?"selected":""}>${x}</option>`).join("")}</select></label><label>${tr("price")}<input class="c-price" type="number" min="0" step=".01" value="${data.price??""}" placeholder="e.g. 2.00"></label><label>${tr("location")}<input class="c-location" value="${esc(data.location||"Shop floor – Unsorted")}" placeholder="Shop floor / Basement"></label><label>${tr("status")}<select class="c-status"><option value="available">${tr("available")}</option><option value="shelved">${tr("shelved")}</option><option value="sold">${tr("sold")}</option><option value="withdrawn">${tr("withdrawn")}</option></select></label><button type="button" class="ghost remove-copy" aria-label="Remove copy">×</button>`;row.querySelector(".c-status").value=data.status||"available";row.querySelector(".remove-copy").onclick=()=>{row.remove()};$("copiesEditor").append(row)}
+function resetForm(){ $("bookForm").reset();$("bookForm").hidden=true;$("copiesEditor").innerHTML="";$("metadataSource").textContent="";currentCopies=0;$("scanMessage").textContent="";$("isbn").value=""}
+function normalizeISBN(s){return String(s||"").replace(/[-\s]/g,"").toUpperCase()}
+async function lookup(){let isbn=normalizeISBN($("isbn").value);if(!isbn){$("scanMessage").textContent="Enter an ISBN first.";return}if(!navigator.onLine){$("scanMessage").textContent=tr("lookupOffline");showForm({isbn});return}
+$("scanMessage").textContent="Searching Google Books and Open Library…";let data=null,source="";
+try{let g=await fetch("https://www.googleapis.com/books/v1/volumes?q=isbn:"+encodeURIComponent(isbn));if(g.ok){let j=await g.json(),v=j.items?.[0]?.volumeInfo;if(v){data={title:v.title||"",authors:(v.authors||[]).join(", "),publisher:v.publisher||"",publishedDate:v.publishedDate||"",description:v.description||"",language:v.language||"",categories:v.categories||[],isbn};source="Google Books"}}}catch(e){}
+if(!data){try{let r=await fetch("https://openlibrary.org/api/books?bibkeys=ISBN:"+encodeURIComponent(isbn)+"&format=json&jscmd=data");if(r.ok){let j=await r.json(),v=j["ISBN:"+isbn];if(v){data={title:v.title||"",authors:(v.authors||[]).map(a=>a.name).join(", "),publisher:(v.publishers||[]).map(p=>p.name).join(", "),publishedDate:v.publish_date||"",description:typeof v.notes==="string"?v.notes:"",language:"",isbn};source="Open Library"}}}catch(e){}}
+if(data){showForm(data);$("metadataSource").textContent=source;$("scanMessage").textContent=tr("found")}else{$("scanMessage").textContent=tr("notFound");showForm({isbn})}}
+function showForm(d){$("bookForm").hidden=false;$("title").value=d.title||"";$("author").value=d.authors||d.author||"";$("formIsbn").value=d.isbn||$("isbn").value;$("publisher").value=d.publisher||"";$("pubDate").value=d.publishedDate||d.pubDate||"";$("description").value=d.description||"";let cat=guessCategory(d);$("category").value=cat;$("subcategory").value="";$("bookLanguage").value=languageChoice(d.language,d.title);$("copiesEditor").innerHTML="";currentCopies=0;addCopyRow();$("bookForm").scrollIntoView({behavior:"smooth",block:"start"})}
+function languageChoice(l,t){let s=(l+" "+t).toLowerCase();if(/zh|chinese|中文|中國|中国/.test(s))return /繁|traditional/.test(s)?"繁體中文":"简体中文";if(/en|english/.test(s))return"English";return""}
+function guessCategory(d){let s=((d.title||"")+" "+(d.description||"")+" "+(d.categories||[]).join(" ")).toLowerCase();if(/child|children|juvenile|picture book/.test(s))return"Children's";if(/crime|thriller|mystery|detective/.test(s))return"Crime & Thrillers";if(/history|historical|war|military/.test(s))return"History";if(/fiction|novel|romance|fantasy/.test(s))return"Fiction";if(/science|business|technology|health|travel|cook/.test(s))return"Non-fiction";return"Other"}
+$("lookupBtn").onclick=lookup;$("isbn").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();lookup()}});$("clearBtn").onclick=()=>{stopCamera();resetForm()};$("addCopyBtn").onclick=()=>addCopyRow();
+$("bookForm").onsubmit=async e=>{e.preventDefault();let isbn=normalizeISBN($("formIsbn").value),existing=(await all("books")).find(b=>isbn&&b.isbn===isbn);let book=existing||{id:uuid(),createdAt:new Date().toISOString()};Object.assign(book,{isbn,title:$("title").value.trim(),author:$("author").value.trim(),publisher:$("publisher").value.trim(),pubDate:$("pubDate").value.trim(),language:$("bookLanguage").value,category:$("category").value,subcategory:$("subcategory").value.trim(),description:$("description").value.trim(),updatedAt:new Date().toISOString(),dirty:true});await put("books",book);let rows=[...$("copiesEditor").querySelectorAll(".copyrow")];for(let row of rows){let copy={id:uuid(),bookId:book.id,condition:row.querySelector(".c-condition").value,price:row.querySelector(".c-price").value===""?null:Number(row.querySelector(".c-price").value),location:row.querySelector(".c-location").value.trim(),status:row.querySelector(".c-status").value,receivedAt:new Date().toISOString(),updatedAt:new Date().toISOString(),dirty:true};await put("copies",copy)}let n=rows.length;resetForm();$("scanMessage").textContent=tr("savedCount").replace("{n}",n)+" "+tr("scanNext");$("isbn").focus();};
+async function renderInventory(){if(!db)return;let [books,copies]=await Promise.all([all("books"),all("copies")]);let q=$("search").value.toLowerCase(),cat=$("filterCategory").value,status=$("filterStatus").value;let list=books.filter(b=>(!cat||b.category===cat)&&[b.title,b.author,b.isbn].join(" ").toLowerCase().includes(q));let html="";for(let b of list){let cs=copies.filter(c=>c.bookId===b.id&&(!status||c.status===status)&&(!q||[c.id,c.location].join(" ").toLowerCase().includes(q)));if(status&&!cs.length)continue;if(q&&!cs.length&&![b.title,b.author,b.isbn].join(" ").toLowerCase().includes(q))continue;html+=`<article class="bookcard"><div><div class="booktitle">${esc(b.title||"(Untitled)")}</div><div class="bookmeta">${esc(b.author||"")} · ${esc(b.isbn||"No ISBN")} · ${esc(b.category||"Other")}${b.subcategory?" / "+esc(b.subcategory):""}</div><div class="copychips">${cs.map(c=>`<span class="chip">${esc(c.id.slice(0,8))} · ${esc(c.condition)} · ${c.price==null?"—":"£"+Number(c.price).toFixed(2)} · ${esc(tr(c.status))} · ${esc(c.location||"")}</span><button class="ghost edit-copy" data-id="${c.id}">✎</button>`).join("")}</div></div><div class="tag">${cs.length} ${lang==="zh"?"本":"copies"}</div></article>`} $("inventoryList").innerHTML=html||`<div class="empty">${tr("noBooks")}</div>`;document.querySelectorAll(".edit-copy").forEach(b=>b.onclick=()=>editCopy(b.dataset.id))}
+async function editCopy(id){let c=(await all("copies")).find(x=>x.id===id);if(!c)return;$("editCopyId").value=id;$("editCondition").value=c.condition;$("editPrice").value=c.price??"";$("editLocation").value=c.location||"";$("editStatus").value=c.status;$("copyDialog").showModal()}
+$("saveCopyEdit").onclick=async e=>{e.preventDefault();let id=$("editCopyId").value,c=(await all("copies")).find(x=>x.id===id);if(!c)return;Object.assign(c,{condition:$("editCondition").value,price:$("editPrice").value===""?null:Number($("editPrice").value),location:$("editLocation").value,status:$("editStatus").value,updatedAt:new Date().toISOString(),dirty:true});await put("copies",c);$("copyDialog").close();renderInventory()};
+$("search").oninput=renderInventory;$("filterCategory").onchange=renderInventory;$("filterStatus").onchange=renderInventory;
+async function renderStats(){if(!db)return;let [books,copies]=await Promise.all([all("books"),all("copies")]);let count=s=>copies.filter(c=>!s||c.status===s).length;let sold=copies.filter(c=>c.status==="sold").reduce((a,c)=>a+(Number(c.price)||0),0);$("stats").innerHTML=[["books",books.length],["copies",copies.length],["available",count("available")+count("shelved")],["sold","£"+sold.toFixed(2)]].map(([l,v])=>`<div class="stat"><strong>${v}</strong><span>${l==="sold"?(lang==="zh"?"已售金額":"Recorded sales value"):l==="books"?(lang==="zh"?"書目／版本":"Book editions"):l==="copies"?(lang==="zh"?"實體副本":"Physical copies"):(lang==="zh"?"可售庫存":"Available stock")}</span></div>`).join("");let html=CATS.map(c=>{let n=copies.filter(x=>x.status!=="sold"&&x.status!=="withdrawn"&&books.find(b=>b.id===x.bookId)?.category===c).length;return`<div class="barrow"><span>${esc(c)}</span><div class="bar"><i style="width:${copies.length?100*n/copies.length:0}%"></i></div><b>${n}</b></div>`}).join("");$("categoryStats").innerHTML=html}
+function csvEscape(v){let s=v==null?"":String(v);return /[",\n\r]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s}
+async function exportCSV(){let [books,copies]=await Promise.all([all("books"),all("copies")]);let headers=["book_id","copy_id","isbn","title","author","publisher","publication_date","book_language","category","subcategory","description","condition","price_gbp","location","status","received_at","updated_at"];let rows=[headers.join(",")];for(let c of copies){let b=books.find(x=>x.id===c.bookId)||{};rows.push([b.id,c.id,b.isbn,b.title,b.author,b.publisher,b.pubDate,b.language,b.category,b.subcategory,b.description,c.condition,c.price,c.location,c.status,c.receivedAt,c.updatedAt].map(csvEscape).join(","))}download(new Blob(["\ufeff"+rows.join("\r\n")],{type:"text/csv;charset=utf-8"}),"bookends-inventory-"+new Date().toISOString().slice(0,10)+".csv")}
+function download(blob,name){let a=document.createElement("a"),url=URL.createObjectURL(blob);a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+$("exportBtn").onclick=exportCSV;
+function parseCSV(text){let rows=[],row=[],v="",q=false;for(let i=0;i<text.length;i++){let c=text[i];if(q){if(c==='"'&&text[i+1]==='"'){v+='"';i++}else if(c==='"')q=false;else v+=c}else if(c==='"')q=true;else if(c===","){row.push(v);v=""}else if(c==="\n"){row.push(v.replace(/\r$/,""));rows.push(row);row=[];v=""}else v+=c}if(v.length||row.length){row.push(v.replace(/\r$/,""));rows.push(row)}let h=(rows.shift()||[]).map(x=>x.trim());return rows.filter(r=>r.some(x=>x!=="")).map(r=>Object.fromEntries(h.map((k,i)=>[k,r[i]??""])))}
+$("importCsv").onchange=async e=>{let f=e.target.files[0];if(!f)return;try{let rows=parseCSV(await f.text()),bookMap=new Map();for(let r of rows){let isbn=normalizeISBN(r.isbn),bookId=r.book_id||uuid(),b=bookMap.get(bookId)||{id:bookId,isbn,title:r.title,author:r.author,publisher:r.publisher,pubDate:r.publication_date,language:r.book_language,category:r.category||"Other",subcategory:r.subcategory,description:r.description,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),dirty:true};bookMap.set(bookId,b);let copyId=r.copy_id||uuid();let old=(await all("copies")).find(c=>c.id===copyId);if(!old)await put("copies",{id:copyId,bookId,condition:r.condition||"Good",price:r.price_gbp===""?null:Number(r.price_gbp),location:r.location||"",status:r.status||"available",receivedAt:r.received_at||new Date().toISOString(),updatedAt:new Date().toISOString(),dirty:true})}for(let b of bookMap.values()){let old=(await all("books")).find(x=>x.id===b.id);if(!old&&b.isbn){let same=(await all("books")).find(x=>x.isbn===b.isbn);if(same)b.id=same.id}await put("books",b)}$("importStatus").textContent=tr("imported").replace("{n}",rows.length);renderInventory()}catch(err){$("importStatus").textContent=tr("invalidCsv")+err.message}e.target.value=""};
+$("backupJson").onclick=async()=>{let data={schema:1,exportedAt:new Date().toISOString(),books:await all("books"),copies:await all("copies")};download(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}),"bookends-backup-"+new Date().toISOString().slice(0,10)+".json")};
+$("restoreJson").onchange=async e=>{let f=e.target.files[0];if(!f)return;try{let d=JSON.parse(await f.text());for(let b of d.books||[])await put("books",b);for(let c of d.copies||[])await put("copies",c);$("importStatus").textContent="JSON restored.";renderInventory()}catch(err){$("importStatus").textContent=err.message}e.target.value=""};
+async function startCamera(){if(!("BarcodeDetector"in window)){ $("scanMessage").textContent=tr("cameraUnsupported");return}try{let detector=new BarcodeDetector({formats:["ean_13","ean_8","upc_a","upc_e"]});stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});$("camera").srcObject=stream;$("camera").hidden=false;await $("camera").play();let scan=async()=>{if(!stream)return;try{let codes=await detector.detect($("camera"));if(codes.length){$("isbn").value=codes[0].rawValue;stopCamera();lookup();return}}catch(e){}requestAnimationFrame(scan)};scan()}catch(e){$("scanMessage").textContent=tr("cameraDenied")}}
+function stopCamera(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}$("camera").hidden=true}
+$("cameraBtn").onclick=startCamera;
+function setConnection(){ $("connection").textContent=navigator.onLine?"● Online":"● Offline";$("connection").style.color=navigator.onLine?"#d8f5df":"#ffe2ad"}
+window.addEventListener("online",setConnection);window.addEventListener("offline",setConnection);
+$("langBtn").onclick=()=>{lang=lang==="en"?"zh":"en";localStorage.setItem("be_lang",lang);setLang();};
+function config(){return{url:$("supabaseUrl").value.trim().replace(/\/$/,""),key:$("supabaseKey").value.trim(),org:$("orgId").value.trim()}}
+["supabaseUrl","supabaseKey","orgId"].forEach(id=>$(id).value=localStorage.getItem("be_"+id)||"");
+function saveConfig(){let c=config();for(let [k,v] of Object.entries({supabaseUrl:c.url,supabaseKey:c.key,orgId:c.org}))localStorage.setItem("be_"+k,v)}
+async function auth(path,body){let c=config();let r=await fetch(c.url+"/auth/v1/"+path,{method:"POST",headers:{"Content-Type":"application/json","apikey":c.key},body:JSON.stringify(body)});let j=await r.json();if(!r.ok)throw Error(j.msg||j.message||j.error_description||"Authentication error");return j}
+$("loginBtn").onclick=async()=>{try{saveConfig();let j=await auth("token?grant_type=password",{email:$("email").value,password:$("password").value});session=j;localStorage.setItem("be_session",JSON.stringify(j));$("syncStatus").textContent=tr("signedIn")}catch(e){$("syncStatus").textContent=e.message}};
+$("logoutBtn").onclick=()=>{session=null;localStorage.removeItem("be_session");$("syncStatus").textContent=tr("signedOut")};
+try{session=JSON.parse(localStorage.getItem("be_session")||"null")}catch(e){}
+async function rest(table,method,body,query=""){let c=config();let token=session?.access_token;if(!token)throw Error(tr("signInFirst"));let r=await fetch(c.url+"/rest/v1/"+table+query,{method,headers:{"Content-Type":"application/json","apikey":c.key,"Authorization":"Bearer "+token,"Prefer":"resolution=merge-duplicates,return=minimal"},body:body?JSON.stringify(body):undefined});if(!r.ok)throw Error(await r.text());return r.status===204?null:r.json()}
+$("syncBtn").onclick=async()=>{try{saveConfig();let c=config();if(!session?.access_token)throw Error(tr("signInFirst"));if(!c.url||!c.key||!c.org)throw Error("Enter Supabase URL, key and organisation ID.");$("syncStatus").textContent="Syncing…";let [books,copies]=await Promise.all([all("books"),all("copies")]);
+let rb=await rest("books","GET",null,"?organization_id=eq."+encodeURIComponent(c.org)+"&select=*");
+let rc=await rest("copies","GET",null,"?organization_id=eq."+encodeURIComponent(c.org)+"&select=*");
+let bookRemote=new Map(rb.map(x=>[x.id,x])),copyRemote=new Map(rc.map(x=>[x.id,x]));
+let bookPush=[],copyPush=[];
+for(let b of books){let remote=bookRemote.get(b.id);if(!remote||new Date(b.updatedAt||0)>new Date(remote.updatedAt||0)){let {dirty,...clean}=b;bookPush.push({...clean,organization_id:c.org})}else if(new Date(remote.updatedAt||0)>new Date(b.updatedAt||0)){await put("books",{...remote,dirty:false})}}
+if(bookPush.length)await rest("books","POST",bookPush,"?on_conflict=id");
+for(let x of copies){let remote=copyRemote.get(x.id);if(!remote||new Date(x.updatedAt||0)>new Date(remote.updatedAt||0)){let {dirty,...clean}=x;copyPush.push({...clean,organization_id:c.org})}else if(new Date(remote.updatedAt||0)>new Date(x.updatedAt||0)){await put("copies",{...remote,dirty:false})}}
+if(copyPush.length)await rest("copies","POST",copyPush,"?on_conflict=id");
+rb=await rest("books","GET",null,"?organization_id=eq."+encodeURIComponent(c.org)+"&select=*");
+rc=await rest("copies","GET",null,"?organization_id=eq."+encodeURIComponent(c.org)+"&select=*");
+for(let b of rb){let local=(await all("books")).find(x=>x.id===b.id);if(!local||new Date(b.updatedAt||0)>=new Date(local.updatedAt||0))await put("books",{...b,dirty:false})}
+for(let x of rc){let local=(await all("copies")).find(y=>y.id===x.id);if(!local||new Date(x.updatedAt||0)>=new Date(local.updatedAt||0))await put("copies",{...x,dirty:false})}$("syncStatus").textContent=tr("syncDone")+" "+rb.length+" books, "+rc.length+" copies.";renderInventory();renderStats()}catch(e){$("syncStatus").textContent=tr("syncError")+e.message}};
+document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>nav(b.dataset.tab));
+(async()=>{db=await openDB();fillCategories();setLang();setConnection();if("serviceWorker"in navigator)navigator.serviceWorker.register("./sw.js").catch(()=>{});renderInventory();renderStats()})();

@@ -1,74 +1,89 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#173b32">
-<meta name="description" content="A private, offline-friendly book tracker with ISBN scanning and CSV backup.">
-<link rel="manifest" href="manifest.json">
-<link rel="icon" href="icon.svg" type="image/svg+xml">
-<title>Book ISBN Tracker</title>
-<style>
-:root{color-scheme:light;--ink:#192a25;--muted:#63736c;--paper:#f5f7f3;--card:#fff;--green:#173b32;--line:#dce4dd;--accent:#d7e8d9;--danger:#a12b2b}
-*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
-header{background:var(--green);color:#fff;padding:20px 16px 18px}header h1{margin:0;font-size:1.4rem}header p{margin:5px 0 0;color:#d8e7de;font-size:.92rem}
-main{max-width:850px;margin:auto;padding:14px 12px 48px}.panel{background:var(--card);border:1px solid var(--line);border-radius:15px;padding:15px;margin:0 0 13px;box-shadow:0 2px 8px #1a35220a}
-h2{font-size:1.08rem;margin:0 0 12px}label{display:block;font-size:.9rem;font-weight:650;margin:10px 0 5px}
-input,select,textarea{font:inherit;width:100%;padding:11px 12px;border:1px solid #c8d4cb;border-radius:9px;background:#fff;color:var(--ink);min-height:44px}
-button,.filebutton{font:inherit;font-weight:650;border:0;border-radius:9px;padding:11px 13px;min-height:43px;background:var(--green);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px}
-button.secondary,.filebutton.secondary{background:#e8eee8;color:var(--green);border:1px solid #d4dfd5}button.danger{background:#fff0f0;color:var(--danger);border:1px solid #f0caca}button:disabled{opacity:.5;cursor:not-allowed}
-.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:11px}.row{display:grid;grid-template-columns:1fr;gap:10px}.hint,.muted{color:var(--muted);font-size:.87rem}.status{padding:9px 11px;background:#edf4ed;border-radius:8px;margin-top:10px;font-size:.9rem;white-space:pre-wrap}.status.error{background:#fff0f0;color:#8d2222}
-#cameraWrap{display:none;margin-top:12px}video{width:100%;max-height:55vh;background:#101b17;border-radius:12px;object-fit:cover;cursor:pointer} .searchbar{display:flex;gap:8px}.searchbar input{flex:1;min-width:0}
-.stats{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.stat{background:#e8eee8;border-radius:99px;padding:5px 10px;font-size:.85rem}
-.book{border:1px solid var(--line);border-radius:12px;padding:12px;margin:9px 0;background:#fff}.booktop{display:flex;gap:12px;align-items:flex-start}.cover{width:62px;min-width:62px;height:88px;object-fit:cover;border-radius:4px;background:#edf0eb}.book h3{font-size:1rem;line-height:1.3;margin:0 0 4px}.book p{margin:3px 0;font-size:.88rem;color:var(--muted);overflow-wrap:anywhere}.book .bookactions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.book .bookactions button{padding:8px 10px;min-height:36px;font-size:.86rem}
-.empty{text-align:center;padding:25px 10px;color:var(--muted)}.small{font-size:.82rem}.toolbar{display:flex;gap:8px;flex-wrap:wrap}.toolbar>*{flex:1}
-#csvFile{display:none}.count{font-weight:750}.hidden{display:none!important}
-@media(min-width:620px){main{padding:22px 18px 60px}.row.two{grid-template-columns:1fr 1fr}.book{padding:14px}.book h3{font-size:1.04rem}}
-</style>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#315c4b"><meta name="description" content="Offline-first Bookends charity bookshop inventory">
+  <link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css"><title>Bookends Inventory</title>
 </head>
 <body>
-<header><h1>📚 Book ISBN Tracker</h1><p>Scan, look up, and keep your book list. Your records stay on this device.</p></header>
+<header class="topbar">
+  <div><div class="brand">BOOKENDS <span>INVENTORY</span></div><div class="sub" data-i18n="subtitle">Eastbourne Library Charity Bookshop</div></div>
+  <div class="header-actions"><span id="connection" class="pill">● Offline ready</span><button id="langBtn" class="ghost" aria-label="Change language">中文</button></div>
+</header>
+<nav class="tabs" aria-label="Main navigation">
+  <button class="tab active" data-tab="scan" data-i18n="scan">Scan / Add</button>
+  <button class="tab" data-tab="inventory" data-i18n="inventory">Inventory</button>
+  <button class="tab" data-tab="reports" data-i18n="reports">Reports</button>
+  <button class="tab" data-tab="settings" data-i18n="settings">Settings & Sync</button>
+</nav>
 <main>
-<section class="panel">
-<h2>Add a book</h2>
-<div class="row two">
-  <div><label for="isbn">ISBN-13 / ISBN-10</label><input id="isbn" inputmode="numeric" autocomplete="off" placeholder="e.g. 9780141036144"></div>
-  <div><label for="category">Category / Subject</label><input id="category" placeholder="e.g. Fiction, History"></div>
-</div>
-<div class="actions"><button id="scanBtn">▦ Scan barcode</button><button id="lookupBtn">Look up ISBN</button><button id="manualBtn" class="secondary">Enter details manually</button></div>
-<div id="cameraWrap"><video id="video" playsinline muted></video><div class="actions"><button id="stopScan" class="secondary">Stop camera</button></div><p class="hint">Point the camera at the book's ISBN barcode and <strong>tap the video preview to focus</strong>. If scanning is unavailable, type the number above.</p></div>
-<div id="status" class="status" role="status" aria-live="polite">Ready. Scanning needs camera permission and a secure HTTPS page.</div>
-<div id="editForm" class="hidden">
-  <div class="row two">
-    <div><label for="title">Title *</label><input id="title" placeholder="Book title"></div>
-    <div><label for="authors">Author(s)</label><input id="authors" placeholder="Author names"></div>
-    <div><label for="publisher">Publisher</label><input id="publisher"></div>
-    <div><label for="year">Publication year</label><input id="year" inputmode="numeric"></div>
-    <div><label for="language">Language</label><input id="language" placeholder="e.g. en"></div>
-    <div><label for="pages">Pages</label><input id="pages" inputmode="numeric"></div>
+<section id="scan" class="page active">
+  <div class="section-head"><div><h1 data-i18n="addBook">Add a book</h1><p data-i18n="scanHelp">Scan the barcode or enter an ISBN. You can work offline.</p></div></div>
+  <div class="panel">
+    <div class="scanrow"><input id="isbn" inputmode="numeric" autocomplete="off" placeholder="ISBN-13 / ISBN-10" aria-label="ISBN"><button id="lookupBtn" class="primary" data-i18n="lookup">Look up</button></div>
+    <div class="buttonrow"><button id="cameraBtn" class="secondary" data-i18n="camera">Use camera scanner</button><button id="clearBtn" class="ghost" data-i18n="clear">Clear</button></div>
+    <video id="camera" playsinline hidden></video><p id="scanMessage" class="hint" role="status"></p>
   </div>
-  <label for="notes">Notes / Synopsis</label><textarea id="notes" rows="3" placeholder="Optional notes or Google Books description"></textarea>
-  <div class="actions"><button id="saveBtn">Save book</button><button id="cancelEdit" class="secondary">Cancel</button></div>
-</div>
+  <form id="bookForm" class="panel" hidden>
+    <div class="form-title"><h2 data-i18n="bookDetails">Book details</h2><span id="metadataSource" class="tag"></span></div>
+    <div class="formgrid">
+      <label><span data-i18n="title">Title</span><input id="title" required></label>
+      <label><span data-i18n="author">Author(s)</span><input id="author"></label>
+      <label><span data-i18n="isbn">ISBN</span><input id="formIsbn"></label>
+      <label><span data-i18n="publisher">Publisher</span><input id="publisher"></label>
+      <label><span data-i18n="pubDate">Publication date</span><input id="pubDate"></label>
+      <label><span data-i18n="language">Book language</span><select id="bookLanguage"><option value="">—</option><option>English</option><option>繁體中文</option><option>简体中文</option><option>Other</option></select></label>
+      <label><span data-i18n="category">Category</span><select id="category"></select></label>
+      <label><span data-i18n="subcategory">Subcategory</span><input id="subcategory"></label>
+      <label class="wide"><span data-i18n="description">Description / notes</span><textarea id="description" rows="2"></textarea></label>
+    </div>
+    <div class="copy-heading"><h2 data-i18n="physicalCopies">Physical copies</h2><span class="hint" data-i18n="copiesHelp">Add one or more copies; each can have its own condition and price.</span></div>
+    <div id="copiesEditor"></div>
+    <div class="buttonrow"><button type="button" id="addCopyBtn" class="secondary" data-i18n="addCopy">+ Add another copy</button><button type="submit" class="primary" data-i18n="saveBook">Save to inventory</button></div>
+  </form>
 </section>
-
-<section class="panel">
-<h2>Your collection</h2>
-<div class="stats"><span class="stat"><span id="totalCount" class="count">0</span> books</span><span class="stat" id="storageLabel">Saved on this device</span></div>
-<div class="searchbar"><input id="filter" placeholder="Search title, author, ISBN, category…" aria-label="Search books"><button id="clearSearch" class="secondary">Clear</button></div>
-<div class="actions">
-<button id="exportBtn">Export CSV</button><label for="csvFile" class="filebutton secondary">Import CSV</label><input id="csvFile" type="file" accept=".csv,text/csv">
-<button id="clearAllBtn" class="danger">Delete all</button>
-</div>
-<p class="hint">CSV import adds new records and updates existing records with the same ISBN. Export a backup regularly.</p>
-<div id="bookList"></div>
+<section id="inventory" class="page">
+  <div class="section-head"><div><h1 data-i18n="inventory">Inventory</h1><p data-i18n="inventoryHelp">Search, filter and update your local stock.</p></div><button id="exportBtn" class="secondary" data-i18n="exportCsv">Export CSV</button></div>
+  <div class="panel">
+    <input id="search" placeholder="Search title, author, ISBN or copy ID…" data-i18n-placeholder="searchPlaceholder">
+    <div class="filterrow"><select id="filterCategory"><option value="" data-i18n="allCategories">All categories</option></select><select id="filterStatus"><option value="" data-i18n="allStatuses">All statuses</option><option value="available">Available</option><option value="shelved">Shelved</option><option value="sold">Sold</option><option value="withdrawn">Withdrawn</option></select></div>
+    <div id="inventoryList" class="inventory-list"></div>
+  </div>
 </section>
-<section class="panel">
-<h2>About data and privacy</h2>
-<p class="hint">Book metadata is fetched from Google Books and Open Library when you look up an ISBN. The book list is stored locally in this browser; it is not synced automatically. Keep your CSV backup if you clear browser data or change phones.</p>
-<p class="hint">For reliable camera access and installation, host these files on an HTTPS website (for example, GitHub Pages). Opening the HTML directly as a file may disable camera and PWA features.</p>
+<section id="reports" class="page">
+  <div class="section-head"><div><h1 data-i18n="reports">Reports</h1><p data-i18n="reportsHelp">A quick view of Bookends stock and processing.</p></div></div>
+  <div id="stats" class="stats"></div>
+  <div class="panel"><h2 data-i18n="byCategory">Stock by category</h2><div id="categoryStats"></div></div>
+</section>
+<section id="settings" class="page">
+  <div class="section-head"><div><h1 data-i18n="settings">Settings & Sync</h1><p data-i18n="syncHelp">Local-first data with optional shared cloud sync for volunteers.</p></div></div>
+  <div class="panel">
+    <h2 data-i18n="cloudSync">Shared volunteer sync (Supabase)</h2>
+    <p class="hint" data-i18n="cloudNote">Each volunteer signs in with an account in the same Supabase project and organisation. Local changes remain available offline and sync when online.</p>
+    <label><span>Supabase project URL</span><input id="supabaseUrl" placeholder="https://your-project.supabase.co"></label>
+    <label><span>Supabase anon / publishable key</span><input id="supabaseKey" placeholder="Public anon key" autocomplete="off"></label>
+    <label><span data-i18n="orgId">Organisation ID (shared with volunteers)</span><input id="orgId" placeholder="UUID"></label>
+    <div class="formgrid">
+      <label><span data-i18n="email">Volunteer email</span><input id="email" type="email" autocomplete="username"></label>
+      <label><span data-i18n="password">Password</span><input id="password" type="password" autocomplete="current-password"></label>
+    </div>
+    <div class="buttonrow"><button id="loginBtn" class="secondary" data-i18n="signIn">Sign in</button><button id="logoutBtn" class="ghost" data-i18n="signOut">Sign out</button><button id="syncBtn" class="primary" data-i18n="syncNow">Sync now</button></div>
+    <p id="syncStatus" class="hint" role="status"></p>
+  </div>
+  <div class="panel">
+    <h2 data-i18n="backupRestore">Backup & restore</h2>
+    <p class="hint" data-i18n="backupNote">CSV is portable and can be opened in Excel. JSON contains a complete backup including settings-independent records.</p>
+    <div class="buttonrow"><button id="backupJson" class="secondary" data-i18n="backupJson">Download JSON backup</button><label class="filebutton secondary"><span data-i18n="importCsv">Import CSV</span><input id="importCsv" type="file" accept=".csv,text/csv"></label><label class="filebutton secondary"><span data-i18n="restoreJson">Restore JSON</span><input id="restoreJson" type="file" accept=".json,application/json"></label></div>
+    <p id="importStatus" class="hint"></p>
+  </div>
+  <div class="panel">
+    <h2 data-i18n="dataCare">Data and privacy</h2>
+    <p class="hint" data-i18n="dataCareText">Without cloud sync, records are stored only in this browser on this device. Clear browser data or uninstalling may remove local records. Export backups regularly. Do not store donor or customer personal data.</p>
+  </div>
 </section>
 </main>
+<footer>Bookends Inventory · <span data-i18n="footer">Volunteer tool · Not affiliated with the library's official systems</span></footer>
+<dialog id="copyDialog"><form method="dialog" id="copyEditForm"><div class="form-title"><h2 data-i18n="editCopy">Edit copy</h2><button class="ghost" value="cancel">✕</button></div><input id="editCopyId" type="hidden"><label><span data-i18n="condition">Condition</span><select id="editCondition"><option>New</option><option>Excellent</option><option>Good</option><option>Fair</option><option>Poor</option></select></label><label><span data-i18n="price">Price (£)</span><input id="editPrice" type="number" min="0" step=".01"></label><label><span data-i18n="location">Location</span><input id="editLocation"></label><label><span data-i18n="status">Status</span><select id="editStatus"><option value="available">Available</option><option value="shelved">Shelved</option><option value="sold">Sold</option><option value="withdrawn">Withdrawn</option></select></label><div class="buttonrow"><button value="cancel" class="ghost" data-i18n="cancel">Cancel</button><button id="saveCopyEdit" value="default" class="primary" data-i18n="saveChanges">Save changes</button></div></form></dialog>
 <script src="app.js"></script>
-</body>
-</html>
+</body></html>
